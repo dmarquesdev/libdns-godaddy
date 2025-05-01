@@ -99,11 +99,11 @@ func (p *Provider) GetRecords(ctx context.Context, zone string) ([]libdns.Record
 
 		// accumulate all records retrieved in the current page
 		for _, record := range resultObj {
-			records = append(records, libdns.Record{
-				Type:  record.Type,
-				Name:  record.Name,
-				Value: record.Value,
-				TTL:   time.Duration(record.TTL) * time.Second,
+			records = append(records, libdns.RR{
+				Type: record.Type,
+				Name: record.Name,
+				Data: record.Value,
+				TTL:  time.Duration(record.TTL) * time.Second,
 			})
 		}
 
@@ -130,21 +130,23 @@ func (p *Provider) AppendRecords(ctx context.Context, zone string, records []lib
 			TTL  int    `json:"ttl"`
 		}
 
-		if record.TTL < time.Duration(600)*time.Second {
-			record.TTL = time.Duration(600) * time.Second
+		rr := record.RR()
+
+		if rr.TTL < time.Duration(600)*time.Second {
+			rr.TTL = time.Duration(600) * time.Second
 		}
 
 		data, err := json.Marshal([]PostRecord{
 			{
-				Data: record.Value,
-				TTL:  int(record.TTL / time.Second),
+				Data: rr.Data,
+				TTL:  int(rr.TTL / time.Second),
 			},
 		})
 		if err != nil {
 			return nil, err
 		}
 
-		req, err := http.NewRequest(http.MethodPut, p.getApiHost()+"/v1/domains/"+getDomain(zone)+"/records/"+record.Type+"/"+getRecordName(zone, record.Name), bytes.NewBuffer(data))
+		req, err := http.NewRequest(http.MethodPut, p.getApiHost()+"/v1/domains/"+getDomain(zone)+"/records/"+rr.Type+"/"+getRecordName(zone, rr.Name), bytes.NewBuffer(data))
 		if err != nil {
 			return nil, err
 		}
@@ -160,7 +162,7 @@ func (p *Provider) AppendRecords(ctx context.Context, zone string, records []lib
 		if resp.StatusCode != http.StatusOK {
 			bodyBytes, _ := ioutil.ReadAll(resp.Body)
 			return nil, fmt.Errorf("could not append records: Domain: %s; Record: %s, Status: %v; Body: %s; PUT: %s",
-				getDomain(zone), getRecordName(zone, record.Name), resp.StatusCode, string(bodyBytes), data)
+				getDomain(zone), getRecordName(zone, rr.Name), resp.StatusCode, string(bodyBytes), data)
 		}
 
 		_, err = ioutil.ReadAll(resp.Body)
@@ -193,8 +195,10 @@ func (p *Provider) DeleteRecords(ctx context.Context, zone string, records []lib
 
 	// accumulate records verified to actually exist in the zone
 	for _, record := range records {
+		rr := record.RR()
 		for _, currentRecord := range currentRecords {
-			if currentRecord.Type == record.Type && currentRecord.Name == getRecordName(zone, record.Name) {
+			crr := currentRecord.RR()
+			if crr.Type == rr.Type && crr.Name == getRecordName(zone, rr.Name) {
 				deletedRecords = append(deletedRecords, currentRecord)
 				break
 			}
@@ -203,7 +207,8 @@ func (p *Provider) DeleteRecords(ctx context.Context, zone string, records []lib
 
 	// loop through and delete verified records with individual API calls
 	for _, record := range deletedRecords {
-		req, err := http.NewRequest(http.MethodDelete, p.getApiHost()+"/v1/domains/"+getDomain(zone)+"/records/"+record.Type+"/"+record.Name, nil)
+		rr := record.RR()
+		req, err := http.NewRequest(http.MethodDelete, p.getApiHost()+"/v1/domains/"+getDomain(zone)+"/records/"+rr.Type+"/"+rr.Name, nil)
 		if err != nil {
 			return nil, err
 		}
